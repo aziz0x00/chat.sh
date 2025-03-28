@@ -10,7 +10,7 @@ Respond to all questions with strict honesty and precision.
 Provide answers that are short and highly concise, technical, and error-free.
 Ensure responses are to the point, free of extraneous details, and limited to the most relevant information.
 Double-check for accuracy before replying.
-Format code to make sure lines are less than 80
+I use arch btw, keep that in mind.
 EOF
 )
 max_tokens=512
@@ -24,13 +24,22 @@ prompt_user() {
     done
 }
 [ -z "$user_prompt" ] && prompt_user
-if [ -p /dev/stdin ]; then
-    user_prompt="$user_prompt"$'\n\n------------\n\n'"$(cat -)"$'\n\n------------'
+if [ -p /dev/stdin ]; then # got pipe
+    input=$(mktemp)
+    cat - >$input
+    if [[ $(file -b --mime-type "$input") =~ image ]]; then
+        image=$(xxd -p -c 1 $input |
+            awk '{ printf "%d,", strtonum("0x" $1) }' |
+            sed 's/,$//; s/^/[/; s/$/]/')
+    else
+        user_prompt="$user_prompt"$'\n\n```n\n'"$(cat $input)"$'\n\n```\n\n'
+    fi
+    rm $input
 fi
 
-body=$(jq -n \
+body=$(echo "$user_prompt" | jq -n \
     --arg system_content "$system_prompt" \
-    --arg user_content "$user_prompt" \
+    --rawfile user_content /dev/stdin \
     '{
         "messages": [
             {"role": "system", "content": $system_content},
@@ -39,6 +48,8 @@ body=$(jq -n \
         "stream": true,
         "max_tokens": '$max_tokens'
     }')
+[ ! -z "$image" ] && body=$(echo $body |
+    jq --slurpfile im <(echo $image) '.image = $im[0]')
 
 shopt -s lastpipe
 trap '[ -z "$user_prompt" ] && exit' INT # for interruption
@@ -52,18 +63,19 @@ while true; do
 
     curl -N https://api.cloudflare.com/client/v4/accounts/$account_id/ai/run/$model \
         -H "Authorization: Bearer $auth" \
-        --json "$body" -s | while IFS= read -r line; do
+        --json @<(echo "$body") -s | while IFS= read -r line; do
 
-        [ -z "$line" -o "$line" = "data: [DONE]" ] && continue
+        [ -z "$line" ] && continue
 
         chunk=$(echo "$line" | sed -e 's/^data: //')
-        echo $chunk | jq .response -j
-        if [ ! -z "$(jq -r .usage <<<"$chunk")" ]; then
-            total_tokens=$(jq -r .usage.total_tokens <<<"$chunk")
-        fi
+        [[ $(jq .usage <<<"$chunk") != null ]] && # will proceed [DONE]
+            total_tokens=$(jq -r .usage.total_tokens <<<"$chunk") &&
+            break
+        response=$(jq \
+            --argjson r "$response" \
+            --argjson c "$chunk" -n '$r + $c.response')
 
-        response=$(echo $chunk |
-            jq --argjson r "$response" '$r + .response' 2>/dev/null)
+        jq .response -j <<<"$chunk"
     done >&3
 
     exec 3>&-
