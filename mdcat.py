@@ -1,6 +1,4 @@
-import os
-import select
-import sys
+import os, signal, select, sys
 from rich.live import Live
 from rich.markdown import Markdown, TextElement, MarkdownContext
 from rich.text import Text
@@ -8,6 +6,29 @@ from rich.theme import Theme
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.padding import Padding
 from markdown_it.token import Token
+
+
+THEME = {
+    "markdown.h1": "#f7faf7 bold on #2aa198",
+    "markdown.h2": "bold #01aefd",
+    "markdown.h3": "bold #01aefd",
+    "markdown.h4": "bold #01aefd",
+    "markdown.h5": "bold #01aefd",
+    "markdown.h6": "bold #01aefd",
+    "markdown.text": "#d0d0d0",
+    "markdown.text": " #d0d0d0",
+    "markdown.strong": "bold #d0d0d0",
+    "markdown.emphasis": "italic #d0d0d0",
+    "markdown.code": "#ff936f on #303030",
+    "markdown.code_block": "on #303030",
+    "markdown.link": "underline #00afff",
+    "markdown.block_quote": "#5fff00",
+    "markdown.list": "#d0d0d0",
+    "markdown.item": "#d0d0d0",
+    "markdown.item_bullet": "#00afff",
+    "markdown.item_number": "#00afff",
+    "none": "#d0d0d0",
+}
 
 
 # inspired from the cool https://github.com/charmbracelet/glow
@@ -44,48 +65,43 @@ class Heading(TextElement):
 
 Markdown.elements["heading_open"] = Heading
 
-THEME = {
-    "markdown.h1": "#f7faf7 bold on #2aa198",
-    "markdown.h2": "bold #01aefd",
-    "markdown.h3": "bold #01aefd",
-    "markdown.h4": "bold #01aefd",
-    "markdown.h5": "bold #01aefd",
-    "markdown.h6": "bold #01aefd",
-    "markdown.text": "#d0d0d0",
-    "markdown.text": " #d0d0d0",
-    "markdown.strong": "bold #d0d0d0",
-    "markdown.emphasis": "italic #d0d0d0",
-    "markdown.code": "#ff936f on #303030",
-    "markdown.code_block": "on #303030",
-    "markdown.link": "underline #00afff",
-    "markdown.block_quote": "#5fff00",
-    "markdown.list": "#d0d0d0",
-    "markdown.item": "#d0d0d0",
-    "markdown.item_bullet": "#00afff",
-    "markdown.item_number": "#00afff",
-    "none": "#d0d0d0",
-}
-console = Console(theme=Theme(THEME), width=90)
 
-markdown_text = ""
-buffer_size = 4096
-timeout = 0.05  # Timeout for select in seconds
+def main():
+    console = Console(theme=Theme(THEME), width=100)
+
+    markdown_text = ""
+    buffer_size = 4096
+    timeout = 0.05  # Timeout for select in seconds
+
+    with Live(console=console, auto_refresh=True, refresh_per_second=30) as live:
+        while resume:
+            # Wait for input
+            rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+            if sys.stdin in rlist:
+                chunk = os.read(sys.stdin.fileno(), buffer_size)
+                if not chunk:
+                    break  # EOF reached
+                markdown_text += chunk.decode("utf-8", errors="replace")
+                md = Markdown(markdown_text, code_theme="ansi_dark", hyperlinks=False)
+                # 1 line top/bottom, 2 spaces left/right
+                live.update(Padding(md, (1, 2)))
 
 
-def render_markdown(text):
-    """Render Markdown text"""
-    return Padding(
-        Markdown(text, code_theme="ansi_dark", hyperlinks=False), (1, 2)
-    )  # Padding: 1 line top/bottom, 2 spaces left/right
+STOP_SIG = signal.SIGUSR1
+PLAY_SIG = signal.SIGUSR2
 
+if __name__ == "__main__":
+    resume = True
+    "ONCE" in sys.argv[1:] and exit(main())
 
-with Live(console=console, auto_refresh=True) as live:
+    def _handle(signum, _):
+        global resume
+        resume = signum == PLAY_SIG
+
+    signal.signal(STOP_SIG, _handle)
+    signal.signal(PLAY_SIG, _handle)
+
     while True:
-        # Wait for input
-        rlist, _, _ = select.select([sys.stdin], [], [], timeout)
-        if sys.stdin in rlist:
-            chunk = os.read(sys.stdin.fileno(), buffer_size)
-            if not chunk:
-                break  # EOF reached
-            markdown_text += chunk.decode("utf-8", errors="replace")
-            live.update(render_markdown(markdown_text))
+        main()
+        while not resume:
+            signal.pause()

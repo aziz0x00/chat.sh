@@ -1,100 +1,100 @@
 #!/bin/bash
 
-source .id
-source ./models/llama3.2-vision-instruct.sh
+_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-system_prompt=$(cat system_prompt.txt)
-max_tokens=512
+STATE_FILE=$(mktemp -u).json
+LOGS_FILE=$(mktemp)
+T=$STATE_FILE.0 # because can't do `cmd < f > f`
 
-user_prompt=$@
-prompt_user() {
+source "$_DIR"/.id
+source "$_DIR"/providers/groq.sh
+
+switch_model ${MODELS[0]}
+
+set_system_prompt "$(cat "$_DIR"/system_prompt.md)"
+
+TOOLS=()
+for tool in Read Glob Write Bash; do
+    source "$_DIR"/tools/${tool}.sh
+    TOOLS+=("${TOOL_DEF}")
+done && activate_tools
+
+function prompt_user {
+    user_prompt=""
     while [ -z "$user_prompt" ]; do
-        echo -ne "\033[0;33m↯\033[00m"
-        read -r -e -p " " user_prompt </dev/tty
+        user_prompt=$(gum input --cursor.foreground="#e5c07b" --header="$model" \
+            --prompt=" ↯ " --prompt.foreground="#e5c07b" </dev/tty)
         [ $? -ne 0 ] && exit # ^D
+        echo -e "\n \033[0;33m↯\033[00m $user_prompt"
+    done
+
+    case "$user_prompt" in
+    /state    | /s) ${EDITOR:vim} $STATE_FILE ;;
+    /continue | /c) kill $SIG_PLAY $mdcat_pid && api_completion ;; # useful after manual modification by /s
+    /logs     | /l) less $LOGS_FILE ;;
+    /model    | /m) switch_model $(echo ${MODELS[@]} |
+        gum choose --input-delimiter=" " --cursor.foreground="#e5c07b") ;;
+    *) return ;;
+
+    esac
+    prompt_user
+}
+
+function confirm_tool { # called from within tool functions
+    function_invocation=$1
+    echo -e "\n> $function_invocation" >&4
+    kill $SIG_STOP $mdcat_pid
+    sleep .1 # sometimes it goes fast
+    gum confirm "Approve tool?" --selected.background="#e5c07b" --selected.foreground="#000" </dev/tty
+    status_code=$?
+    printf "\e[3;2m  %s\e[0m\n\n" $([[ "$status_code" -eq 0 ]] && echo "Accepted" || echo "Rejected") >/dev/tty
+    kill $SIG_PLAY $mdcat_pid
+    return $status_code
+}
+
+function tool_call {
+    funcname=$1
+    arguments=$2
+
+    for tool in "${TOOLS[@]}"; do
+        [[ "$funcname" != $(jq -r .name <<<"$tool") ]] && continue
+        echo ">>> $funcname($arguments)" >>$LOGS_FILE
+        "$funcname" "$arguments" | tee -a $LOGS_FILE
+        echo "<<<" >>$LOGS_FILE
+        break
     done
 }
-prompt_user
-if [ -p /dev/stdin ]; then # got pipe
+
+function __consume_pipe {
     input=$(mktemp)
     cat - >$input
     if [[ $(file -b --mime-type "$input") =~ image ]]; then
-        image=$(xxd -p -c 1 $input |
-            awk '{ printf "%d,", strtonum("0x" $1) }' |
-            sed 's/,$//; s/^/[/; s/$/]/')
+        set-attachments "$input"
     else
-        user_prompt="$user_prompt"$'\n\n```n\n'"$(cat $input)"$'\n\n```\n\n'
+        user_prompt=$user_prompt$'\n\n---n\n'"$(cat $input)"
     fi
     rm $input
-fi
-prompt="$begin$(turn system "$system_prompt")$(turn user "$user_prompt")$end"
+}
 
-body='{
-    "prompt": "",
-    "raw": true,
-    "stream": true,
-    "max_tokens": '"$max_tokens"'
-}'
-[ ! -z "$image" ] &&
-    body=$(jq --slurpfile im <(echo "$image") '.image = $im[0]' <<<"$body")
+user_prompt=$@
+[[ -z "$@" ]] && prompt_user
+[[ -p /dev/stdin ]] && __consume_pipe # should be after prompt_user
 
-shopt -s lastpipe
-trap '[ -z "$user_prompt" ] && exit' INT # for interruption
+# setup mdcat process for pretty-printing
+exec 4> >(python "$_DIR"/mdcat.py 2>/dev/null)
+mdcat_pid=$!
+SIG_STOP=-SIGUSR1
+SIG_PLAY=-SIGUSR2
 
-while true; do
-    response=
-    total_tokens=
-    is_tool_call=
+trap "rm -f $LOGS_FILE; rm -f $STATE_FILE; kill $mdcat_pid 2>/dev/null" EXIT
+trap '[ -z "$user_prompt" ] && exit' INT # exit on ^C if no prompt
 
-    exec 3> >(python mdcat.py 2>/dev/null)
-    mdcat_pid=$!
+while true; do # main loop
+    api_completion "$user_prompt"
 
-    body=$(jq --arg prompt "$prompt" '.prompt += $prompt' <<<"$body")
-    # echo "$body" | jq -r '.prompt'
-    curl -N https://api.cloudflare.com/client/v4/accounts/$account_id/ai/run/$model \
-        -H "Authorization: Bearer $auth" \
-        --json @<(echo "$body") -s | while IFS= read -r line; do
-
-        [ -z "$line" ] && continue
-        chunk=$(echo "$line" | sed -e 's/^data: //')
-
-        [[ $(jq .usage <<<"$chunk") != null ]] && # will proceed [DONE]
-            total_tokens=$(jq -r .usage.total_tokens <<<"$chunk") &&
-            break
-
-        token=$(
-            jq .response -r -j <<<"$chunk"
-            echo .
-        )
-        token=${token%.} # bash :(
-
-        response="$response$token"
-
-        if [[ "$token" == "<|python_tag|>" ]]; then
-            is_tool_call=1
-            echo '```python'
-            continue
-        fi
-
-        echo -ne "$token"
-    done >&3
-
-    exec 3>&-
-    wait $mdcat_pid 2>/dev/null
-
-    if [[ $is_tool_call ]]; then
-        read -r -e -p "Run ? (y/n) " yn </dev/tty
-        if [[ "$yn" == "y" ]]; then
-            output=$(python <(echo "$response" | cut -c15- -z | tr -d '\0') 2>&1)
-            echo COMMAND OUT: "$output" | less
-            prompt="$response$eom$(turn ipython "$output")$end"
-            continue
-        fi
-    fi
-
-    [ ! -z "$total_tokens" ] && echo -e "\033[38;5;244m$total_tokens tokens\033[0m"
-
-    user_prompt=''
+    kill $SIG_STOP $mdcat_pid && sleep .1
+    [[ ! -z "$total_tokens" ]] && echo -e "\e[38;5;244m$total_tokens tokens\e[0m"
     prompt_user
-    prompt="$response$eot$(turn user "$user_prompt")$end"
+
+    kill $SIG_PLAY $mdcat_pid
 done
