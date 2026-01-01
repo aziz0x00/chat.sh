@@ -14,7 +14,7 @@ switch_model ${MODELS[0]}
 set_system_prompt "$(cat "$_DIR"/system_prompt.md)"
 
 TOOLS=()
-for tool in Read Glob Write Bash; do
+for tool in Read Glob Write Bash Grep Edit; do
     source "$_DIR"/tools/${tool}.sh
     TOOLS+=("${TOOL_DEF}")
 done && activate_tools
