@@ -5,7 +5,7 @@ max_tokens=4096
 echo -ne '{
   "model": "'$model'",
   "max_completion_tokens": '$max_tokens',
-  "temperature": 0.6, "top_p": 1,
+  "temperature": 0.2, "top_p": 1,
   "messages": [], "tools": [],
   "stream": true
 }' >$STATE_FILE
