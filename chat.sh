@@ -89,9 +89,7 @@ user_prompt=$@
 [[ -p /dev/stdin ]] && __consume_pipe # should be after prompt_user
 
 # setup mdcat process for pretty-printing
-# use python3 or python (Linux compatibility)
-_python=$(command -v python3 || command -v python)
-exec 4> >($_python "$_DIR"/mdcat.py 2>/dev/null)
+exec 4> >(python3 "$_DIR"/mdcat.py 2>/dev/null)
 mdcat_pid=$!
 SIG_STOP=-SIGUSR1
 SIG_PLAY=-SIGUSR2
