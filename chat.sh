@@ -1,6 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 _DIR=$(dirname "${BASH_SOURCE[0]}")
+
+# check dependencies
+for cmd in jq gum curl; do
+    command -v "$cmd" &>/dev/null || { echo "Error: '$cmd' is required but not installed." >&2; exit 1; }
+done
+
+# check API key file
+[[ ! -f "$_DIR/.id" ]] && { echo "Error: .id file not found. Copy .id.example to .id and add your API key." >&2; exit 1; }
 
 STATE_FILE=$(mktemp -u).json
 LOGS_FILE=$(mktemp)
@@ -29,7 +37,7 @@ function prompt_user {
     done
 
     case "$user_prompt" in
-    /state    | /s) ${EDITOR:vim} $STATE_FILE ;;
+    /state    | /s) ${EDITOR:-vim} $STATE_FILE ;;
     /continue | /c) kill $SIG_PLAY $mdcat_pid && api_completion ;; # useful after manual modification by /s
     /logs     | /l) less $LOGS_FILE ;;
     /model    | /m) switch_model $(echo ${MODELS[@]} |
@@ -71,7 +79,7 @@ function __consume_pipe {
     if [[ $(file -b --mime-type "$input") =~ image ]]; then
         set-attachments "$input"
     else
-        user_prompt=$user_prompt$'\n\n---n\n'"$(cat $input)"
+        user_prompt=$user_prompt$'\n\n---\n'"$(cat $input)"
     fi
     rm $input
 }
@@ -81,7 +89,7 @@ user_prompt=$@
 [[ -p /dev/stdin ]] && __consume_pipe # should be after prompt_user
 
 # setup mdcat process for pretty-printing
-exec 4> >(python "$_DIR"/mdcat.py 2>/dev/null)
+exec 4> >(python3 "$_DIR"/mdcat.py 2>/dev/null)
 mdcat_pid=$!
 SIG_STOP=-SIGUSR1
 SIG_PLAY=-SIGUSR2
