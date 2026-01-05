@@ -9,7 +9,7 @@ cmd1 | chat whats this
 ```
 
 ```bash
-chat "what's an cyclic endomorphism"
+chat "what's a cyclic endomorphism"
 ```
 
 ```bash
@@ -20,7 +20,16 @@ chat
 
 #### Available Tools
 
-It can read, write, execute command on system at your permission
+| Tool | Description |
+|------|-------------|
+| `Read` | Read file contents |
+| `Write` | Write/create files |
+| `Glob` | Find files by pattern |
+| `Bash` | Execute shell commands |
+| `Grep` | Search file contents |
+| `Edit` | Replace strings in files |
+
+All tools require your permission before execution.
 
 #### Slash Commands
 
@@ -31,12 +40,41 @@ It can read, write, execute command on system at your permission
 
 ## Get Started
 
-Make sure to have [jq](https://github.com/jqlang/jq) and [gum](https://github.com/charmbracelet/gum) installed
-
-Clone the repo, save it somewhere and alias `chat.sh` to a command name of your preference
+### 1. Install dependencies
 
 ```bash
-alias j='/path/to/chat.sh'
+# macOS
+brew install jq gum bash
+pip3 install rich markdown-it-py
+
+# Linux (Debian/Ubuntu)
+apt install jq curl
+# Install gum: https://github.com/charmbracelet/gum#installation
+pip3 install rich markdown-it-py
+```
+
+### 2. Get API key
+
+Get a free API key from [Groq Console](https://console.groq.com)
+
+### 3. Setup
+
+```bash
+git clone https://github.com/aziz0x00/chat.sh.git
+cd chat.sh
+cp .id.example .id
+# Edit .id and add your GROQ_API_KEY
+```
+
+### 4. Run
+
+```bash
+./chat.sh "hello"
+```
+
+Or create an alias:
+```bash
+alias chat='/path/to/chat.sh'
 ```
 
 ## Add Capabilities
@@ -63,9 +101,9 @@ function Foo {
 }
 ```
 
-Check available tools for reference
+Check available tools for reference.
 
-For now you can put your system prompt in `system_prompt.md` (the current one needs improvements)..
+For now you can put your system prompt in `system_prompt.md` (the current one needs improvements).
 
 ## TODO
 
