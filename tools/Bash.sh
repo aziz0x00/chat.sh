@@ -1,31 +1,40 @@
 TOOL_DEF='{
-    "name": "Bash",
-    "description": "Execute a Bash command shell environment.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "command": {
-          "type": "string",
-          "description": "The Bash command line to execute. May include pipes, redirects, etc."
-        },
-        "timeout": {
-          "type": "integer",
-          "description": "Maximum execution time in seconds. Optional; default is 30."
-        }
+  "name": "Bash",
+  "description": "Execute a Bash command shell environment.\n - When using curl and you expect html output, prefer to use `html2text`.\n - You also have `pdftotext` available for reading pdfs.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "The Bash command line to execute. May include pipes, redirects, etc."
       },
-      "required": ["command"]
-    }
+      "timeout": {
+        "type": "integer",
+        "default": 30,
+        "description": "Maximum execution time in seconds. Optional; default is 30."
+      }
+    },
+    "required": ["command"]
+  }
 }'
 
+# @return json: {fmt: string, preview: string, nextArgs: [string]}
+function PreBash {
+  local parameters=$(jq '.timeout = (.timeout // 30)' <<<"$1") # set defaults
+
+  jq '{
+    fmt: (.command|tojson),
+    preview: "",
+    nextArgs: [.command, .timeout]
+  }' <<<"$parameters"
+}
+
 function Bash {
-  command=$(jq -r .command <<<"$1")
-  timeout=$(jq -r .timeout <<<"$1")
-  [[ "$timeout" == "null" || -z "$timeout" ]] && timeout=30
+  local command=$1
+  local timeout=$2
 
-  confirm_tool "Bash(command='$command', timeout=$timeout)" || return 1
-
-  output=$(timeout "$timeout" bash -c "$command" 2>&1)
-  exit_code=$?
+  local output=$(timeout "$timeout" bash -c "$command" 2>&1 <&-)
+  local exit_code=$?
   if [[ $exit_code -eq 124 ]]; then
     echo "Error: Command timed out after $timeout seconds. Output: $output"
   elif [[ $exit_code -ne 0 ]]; then

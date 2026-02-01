@@ -16,18 +16,20 @@ THEME = {
     "markdown.h5": "bold #01aefd",
     "markdown.h6": "bold #01aefd",
     "markdown.text": "#d0d0d0",
-    "markdown.text": " #d0d0d0",
     "markdown.strong": "bold #d0d0d0",
     "markdown.emphasis": "italic #d0d0d0",
-    "markdown.code": "#ff936f on #303030",
-    "markdown.code_block": "on #303030",
-    "markdown.link": "underline #00afff",
-    "markdown.block_quote": "#5fff00",
+    "markdown.code": "#89b4fa on #313244",
+    "markdown.code_block": "on #313244",
+    "markdown.link": "#94e2d5 underline",
+    "markdown.block_quote": "#fab387",
     "markdown.list": "#d0d0d0",
     "markdown.item": "#d0d0d0",
-    "markdown.item_bullet": "#00afff",
-    "markdown.item_number": "#00afff",
+    "markdown.item.bullet": "#cfab5e",
+    "markdown.item.number": "#cfab5e",
+    # "markdown.item_bullet": "#cba6f7",  # mauve bullets
+    # "markdown.item_number": "#89b4fa",
     "none": "#d0d0d0",
+    "markdown.hr": "#585b70",
 }
 
 
@@ -67,13 +69,14 @@ Markdown.elements["heading_open"] = Heading
 
 
 def main():
-    console = Console(theme=Theme(THEME), width=100)
+    console = Console(theme=Theme(THEME))
+    console.width = min(console.width, 100) # fit width
 
     markdown_text = ""
     buffer_size = 4096
     timeout = 0.05  # Timeout for select in seconds
 
-    with Live(console=console, auto_refresh=True, refresh_per_second=30) as live:
+    with Live(console=console, auto_refresh=True, refresh_per_second=4) as live:
         while resume:
             # Wait for input
             rlist, _, _ = select.select([sys.stdin], [], [], timeout)
@@ -92,7 +95,11 @@ PLAY_SIG = signal.SIGUSR2
 
 if __name__ == "__main__":
     resume = True
-    "ONCE" in sys.argv[1:] and exit(main())
+    "--once" in sys.argv[1:] and exit(main())
+
+    logfile = None
+    if len(sys.argv) >= 2:
+        logfile = open(sys.argv[1], "a")
 
     def _handle(signum, _):
         global resume
@@ -102,6 +109,8 @@ if __name__ == "__main__":
     signal.signal(PLAY_SIG, _handle)
 
     while True:
+        logfile and logfile.write("\n[P]\n") and logfile.flush()
         main()
+        logfile and logfile.write("\n[S]\n") and logfile.flush()
         while not resume:
             signal.pause()

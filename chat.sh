@@ -1,108 +1,149 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 _DIR=$(dirname "${BASH_SOURCE[0]}")
 
-# check dependencies
-for cmd in jq gum curl; do
-    command -v "$cmd" &>/dev/null || { echo "Error: '$cmd' is required but not installed." >&2; exit 1; }
-done
+[[ "$1" == "-raw" ]] && RAW_OUTPUT=true && shift
+TMP_BASE=$(mktemp -u)
+STATE_FILE=$TMP_BASE.json
+LOGS_FILE=$TMP_BASE.log
+touch "$LOGS_FILE" &&
+    [[ ! -z "$TMUX_PANE" ]] &&
+    tmux splitw -dv -l 5 'echo -e "\e[38;5;244mLOGS('$LOGS_FILE')"; tail --follow=name '$LOGS_FILE' 2>/dev/null'
 
-# check API key file
-[[ ! -f "$_DIR/.id" ]] && { echo "Error: .id file not found. Copy .id.example to .id and add your API key." >&2; exit 1; }
+source "$_DIR"/.env
+source "$_DIR"/providers/opencode-zen.sh
 
-STATE_FILE=$(mktemp -u).json
-LOGS_FILE=$(mktemp)
-T=$STATE_FILE.0 # because can't do `cmd < f > f`
-
-source "$_DIR"/.id
-source "$_DIR"/providers/groq.sh
+function jq_inplace { jq "$@" <$STATE_FILE >${STATE_FILE}.tmp && mv ${STATE_FILE}.tmp $STATE_FILE; }
 
 switch_model ${MODELS[0]}
 
-set_system_prompt "$(cat "$_DIR"/system_prompt.md)"
+add_system_prompt "$(cat "$_DIR"/system_prompt.md)"
+add_system_prompt "Current date: $(date "+%a %b %d %Y")"
 
-TOOLS=()
-for tool in Read Glob Write Bash; do
+declare -A TOOLS ALLOWED_TOOLS SAFE_TOOLS=([Skill]=1 [WebSearch]=1) # TODO: do better tool perms mgmt
+for tool in Read Glob Grep WebSearch Skill Edit Write Bash; do
     source "$_DIR"/tools/${tool}.sh
-    TOOLS+=("${TOOL_DEF}")
-done && activate_tools
+    TOOLS[$tool]=$TOOL_DEF
+done && activate_tools TOOLS
 
 function prompt_user {
-    user_prompt=""
-    while [ -z "$user_prompt" ]; do
-        user_prompt=$(gum input --cursor.foreground="#e5c07b" --header="$model" \
-            --prompt=" ↯ " --prompt.foreground="#e5c07b" </dev/tty)
+    [[ ! -z "$RAW_OUTPUT" ]] && exit
+    while true; do
+        local width=$(($(tput cols) - 2)) && ((width > 80)) && width=80
+        user_prompt=""
+        user_prompt=$(gum write --width $width --cursor.foreground="#e5c07b" --header="$model" \
+            --prompt.foreground="#e5c07b" --height=3 </dev/tty)
         [ $? -ne 0 ] && exit # ^D
-        echo -e "\n \033[0;33m↯\033[00m $user_prompt"
+        [ -z "$user_prompt" ] && continue
+        [[ $width -gt ${#user_prompt} ]] && width=0
+        gum style --width $width --margin '0 0' --border=normal \
+            --padding="0 1" --border-foreground '#4c566a' "$user_prompt"
+
+        case "$user_prompt" in
+        /state | /s) ${EDITOR:-vim} $STATE_FILE ;;
+        /continue | /c) user_prompt="" && return ;; # useful after manual modification by /s
+        /logs | /l) less $LOGS_FILE ;;
+        # /agent    | /a) switch_agent ;;
+        /model | /m) switch_model $(echo "${MODELS[@]}" |
+            gum choose --input-delimiter=" " --cursor.foreground="#e5c07b") ;;
+        *) return ;;
+        esac
     done
-
-    case "$user_prompt" in
-    /state    | /s) ${EDITOR:-vim} $STATE_FILE ;;
-    /continue | /c) kill $SIG_PLAY $mdcat_pid && api_completion ;; # useful after manual modification by /s
-    /logs     | /l) less $LOGS_FILE ;;
-    /model    | /m) switch_model $(echo ${MODELS[@]} |
-        gum choose --input-delimiter=" " --cursor.foreground="#e5c07b") ;;
-    *) return ;;
-
-    esac
-    prompt_user
-}
-
-function confirm_tool { # called from within tool functions
-    function_invocation=$1
-    echo -e "\n> $function_invocation" >&4
-    kill $SIG_STOP $mdcat_pid
-    sleep .1 # sometimes it goes fast
-    gum confirm "Approve tool?" --selected.background="#e5c07b" --selected.foreground="#000" </dev/tty
-    status_code=$?
-    printf "\e[3;2m  %s\e[0m\n\n" $([[ "$status_code" -eq 0 ]] && echo "Accepted" || echo "Rejected") >/dev/tty
-    kill $SIG_PLAY $mdcat_pid
-    return $status_code
 }
 
 function tool_call {
-    funcname=$1
-    arguments=$2
+    local funcname=$1
+    local parameters=$2
+    local result_var=$3
 
-    for tool in "${TOOLS[@]}"; do
-        [[ "$funcname" != $(jq -r .name <<<"$tool") ]] && continue
-        echo ">>> $funcname($arguments)" >>$LOGS_FILE
-        "$funcname" "$arguments" | tee -a $LOGS_FILE
-        echo "<<<" >>$LOGS_FILE
-        break
+    MAX_OUTPUT=30000
+
+    declare -n result=$result_var
+
+    kill -$SIG_STOP $mdcat_pid 2>/dev/null && sleep .1 # sometimes it goes too fast and python is slow
+
+    [[ -z "${TOOLS[$funcname]}" ]] && result="Tool unavailable." && return
+
+    local output
+    output=$(Pre$funcname "$parameters")
+    [[ $? -ne 0 ]] && result="$output" && return # immediately exit on error
+
+    printf "$funcname>>\n%s\n\e[38;5;244m<<$funcname\n" "$(jq -r .preview <<<"$output")" >>$LOGS_FILE
+    jq .nextArgs <<<"$output" >>$LOGS_FILE
+
+    fmt=$(jq -c -r .fmt <<<"$output")
+
+    fun=$(gum style "  › $funcname" --bold)
+    par=$(gum style "$fmt" --foreground '#93a1a1')
+
+    local status_code=0
+    [[ -z "${ALLOWED_TOOLS[$fmt]}""${SAFE_TOOLS[$funcname]}" ]] && {
+        local prompt=$(gum style "$fun $par" \
+            --foreground '#e5c07b')$'\n\n Approve invocation?'
+        answer=$(echo -e "Yes\nYes, always allow this signature\nNo, adjust approach" |
+            gum choose --header="$prompt" --cursor.foreground="#e5c07b")
+
+        case "$answer" in
+        Yes) ;;
+        "Yes, always"*)
+            ALLOWED_TOOLS[$fmt]=1
+            echo "Tool allowed: " "$fmt" >>$LOGS_FILE
+            ;;
+        *) status_code=1 ;;
+        esac
+    }
+
+    gum style "$fun $par" --foreground \
+        $([[ "$status_code" -eq 0 ]] && echo '#34d399' || echo "#e5c07b" --faint) >/dev/tty
+    kill -$SIG_PLAY $mdcat_pid 2>/dev/null
+    [[ "$status_code" -ne 0 ]] && return 1 # interrupt and give back prompt
+
+    local nextArgs=()
+    jq '.nextArgs[]' <<<"$output" | while read -r line; do
+        nextArgs+=("$(jq -r '.' <<<"$line")")
     done
+    result=$($funcname "${nextArgs[@]}" | tee -a $LOGS_FILE)
+    result=$(echo "$result" | head -c $MAX_OUTPUT)
 }
 
 function __consume_pipe {
-    input=$(mktemp)
+    local input=$(mktemp)
     cat - >$input
     if [[ $(file -b --mime-type "$input") =~ image ]]; then
-        set-attachments "$input"
+        set_attachments "$input"
     else
-        user_prompt=$user_prompt$'\n\n---\n'"$(cat $input)"
+        user_prompt=$user_prompt$'\n\n---\n\n'"$(cat $input)"
     fi
     rm $input
 }
 
+function clean_exit {
+    rm -f $TMP_BASE*
+    kill -9 $mdcat_pid 2>/dev/null
+    exit
+}
+trap "clean_exit" EXIT
+trap '[ -z "$user_prompt" ] && clean_exit' INT # to interrupt generation and go back to prompt
+
 user_prompt=$@
 [[ -z "$@" ]] && prompt_user
-[[ -p /dev/stdin ]] && __consume_pipe # should be after prompt_user
+[[ -p /dev/stdin ]] || [[ -f /dev/stdin ]] && __consume_pipe # should be after prompt_user
 
 # setup mdcat process for pretty-printing
-exec 4> >(python3 "$_DIR"/mdcat.py 2>/dev/null)
-mdcat_pid=$!
-SIG_STOP=-SIGUSR1
-SIG_PLAY=-SIGUSR2
+[[ -z "$RAW_OUTPUT" ]] && {
+    exec 4> >(python3 "$_DIR"/mdcat.py "$LOGS_FILE" 2>>$LOGS_FILE)
+    mdcat_pid=$!
+} || exec 4> >(cat -)
 
-trap "rm -f $LOGS_FILE; rm -f $STATE_FILE; kill $mdcat_pid 2>/dev/null" EXIT
-trap '[ -z "$user_prompt" ] && exit' INT # exit on ^C if no prompt
+SIG_STOP=SIGUSR1
+SIG_PLAY=SIGUSR2
 
 while true; do # main loop
     api_completion "$user_prompt"
 
-    kill $SIG_STOP $mdcat_pid && sleep .1
-    [[ ! -z "$total_tokens" ]] && echo -e "\e[38;5;244m$total_tokens tokens\e[0m"
+    kill -$SIG_STOP $mdcat_pid 2>/dev/null && sleep .1
+    [[ ! -z "$total_tokens" ]] && [[ -z "$RAW_OUTPUT" ]] && echo -e "\e[38;5;244m$total_tokens tokens\e[0m"
     prompt_user
 
-    kill $SIG_PLAY $mdcat_pid
+    kill -$SIG_PLAY $mdcat_pid 2>/dev/null
 done
