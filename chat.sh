@@ -79,11 +79,10 @@ function tool_call {
     local status_code=0
     [[ -z "${ALLOWED_TOOLS[$fmt]}""${SAFE_TOOLS[$funcname]}" ]] && {
         [[ -f "$NOTIFICATION_SOUND" ]] && { # delayed alert
-            {
+            (
                 sleep 5
                 ffplay -nodisp -autoexit -volume 70 "$NOTIFICATION_SOUND" &>/dev/null
-                sound_pid=
-            } &
+            ) &
             sound_pid=$!
         }
         local prompt=$(gum style "$fun $par" \
@@ -91,7 +90,7 @@ function tool_call {
         answer=$(echo -e "Yes\nYes, always allow this signature\nNo, adjust approach" |
             gum choose --header="$prompt" --cursor.foreground="#e5c07b")
 
-        [[ -n "$sound_pid" ]] && kill $sound_pid
+        [[ "$(jobs -rp | tail -1)" == "$sound_pid" ]] && kill $sound_pid
 
         case "$answer" in
         Yes) ;;
