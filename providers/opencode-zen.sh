@@ -163,8 +163,8 @@ function api_completion {
                 }
             fi
         done
-        # echo "${PIPESTATUS[@]}" >>$LOGS_FILE
-        # [[ "${PIPESTATUS[0]}" -eq 22 ]] && echo "Retrying connection.." >>$LOGS_FILE && sleep 2 && continue
+        [[ -z "$response" ]] && [[ "${#tools[@]}" -eq 0 ]] &&
+            echo "[No response, retrying in 2s..]" >>$LOGS_FILE && sleep 2 && continue
 
         [[ ! -z "$response" ]] &&
             __append_message "assistant" "$(jq -n --arg c "$response" '{content: $c}')"

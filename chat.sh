@@ -40,11 +40,11 @@ function prompt_user {
             --padding="0 1" --border-foreground '#4c566a' "$user_prompt"
 
         case "$user_prompt" in
-        /state | /s) ${EDITOR:-vim} $STATE_FILE ;;
+        /state    | /s) ${EDITOR:-vim} $STATE_FILE ;;
         /continue | /c) user_prompt="" && return ;; # useful after manual modification by /s
-        /logs | /l) less $LOGS_FILE ;;
+        /logs     | /l) less $LOGS_FILE ;;
         # /agent    | /a) switch_agent ;;
-        /model | /m) switch_model $(echo "${MODELS[@]}" |
+        /model    | /m) switch_model $(echo "${MODELS[@]}" |
             gum choose --input-delimiter=" " --cursor.foreground="#e5c07b") ;;
         *) return ;;
         esac
@@ -78,10 +78,20 @@ function tool_call {
 
     local status_code=0
     [[ -z "${ALLOWED_TOOLS[$fmt]}""${SAFE_TOOLS[$funcname]}" ]] && {
+        [[ -f "$NOTIFICATION_SOUND" ]] && { # delayed alert
+            {
+                sleep 5
+                ffplay -nodisp -autoexit -volume 70 "$NOTIFICATION_SOUND" &>/dev/null
+                sound_pid=
+            } &
+            sound_pid=$!
+        }
         local prompt=$(gum style "$fun $par" \
             --foreground '#e5c07b')$'\n\n Approve invocation?'
         answer=$(echo -e "Yes\nYes, always allow this signature\nNo, adjust approach" |
             gum choose --header="$prompt" --cursor.foreground="#e5c07b")
+
+        [[ -n "$sound_pid" ]] && kill $sound_pid
 
         case "$answer" in
         Yes) ;;
