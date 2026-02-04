@@ -1,3 +1,9 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["rich"]
+# ///
+
 import os, signal, select, sys
 from rich.live import Live
 from rich.markdown import Markdown, TextElement, MarkdownContext

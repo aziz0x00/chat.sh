@@ -22,7 +22,7 @@ chat
 
 ## Install
 
-Make sure to have [jq](https://github.com/jqlang/jq) and [gum](https://github.com/charmbracelet/gum) installed
+Make sure to have [uv](https://github.com/astral-sh/uv), [jq](https://github.com/jqlang/jq) and [gum](https://github.com/charmbracelet/gum) installed
 
 Clone the repo, save it somewhere and alias `chat.sh` to a command name of your preference
 

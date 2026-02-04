@@ -90,7 +90,7 @@ function tool_call {
         answer=$(echo -e "Yes\nYes, always allow this signature\nNo, adjust approach" |
             gum choose --header="$prompt" --cursor.foreground="#e5c07b")
 
-        [[ "$(jobs -rp | tail -1)" == "$sound_pid" ]] && kill $sound_pid
+        [[ -n "$sound_pid" ]] && [[ "$sound_pid" == "$(jobs -rp | tail -1)" ]] && kill $sound_pid
 
         case "$answer" in
         Yes) ;;
@@ -127,9 +127,9 @@ function __consume_pipe {
 }
 
 function clean_exit {
-    rm -f $TMP_BASE*
-    kill -9 $mdcat_pid 2>/dev/null
-    exit
+    rm -f $TMP_BASE*;
+    kill -9 $mdcat_pid 2>/dev/null;
+    exit;
 }
 trap "clean_exit" EXIT
 trap '[ -z "$user_prompt" ] && clean_exit' INT # to interrupt generation and go back to prompt
@@ -140,7 +140,7 @@ user_prompt=$@
 
 # setup mdcat process for pretty-printing
 [[ -z "$RAW_OUTPUT" ]] && {
-    exec 4> >(python3 "$_DIR"/mdcat.py "$LOGS_FILE" 2>>$LOGS_FILE)
+    exec 4> >(uv run "$_DIR"/mdcat.py "$LOGS_FILE" 2>>$LOGS_FILE)
     mdcat_pid=$!
 } || exec 4> >(cat -)
 
