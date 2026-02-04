@@ -59,7 +59,7 @@ Put your providers API keys (if any) in `.env`, see `.env.example`
 
 ### Skills
 
-All skills must be placed in `~/.agent/skills/` (customized by `SKILL_PATH` env var) in the standard `SKILL.md` format, see `./tools/Skill.sh`.
+All skills must be placed in `~/.agents/skills/` (customized by `SKILL_PATH` env var) in the standard `SKILL.md` format, see `./tools/Skill.sh`.
 
 ### Tools
 

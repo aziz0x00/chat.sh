@@ -13,7 +13,7 @@ TOOL_DEF='{
   }
 }'
 
-_SKILL_PATH=${SKILL_PATH:-~/.agent/skills}
+_SKILL_PATH=${SKILL_PATH:-~/.agents/skills}
 
 function __onStartup {
   # Create skill directory on include
