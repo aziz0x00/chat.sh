@@ -8,7 +8,7 @@ STATE_FILE=$TMP_BASE.json
 LOGS_FILE=$TMP_BASE.log
 touch "$LOGS_FILE" &&
     [[ ! -z "$TMUX_PANE" ]] &&
-    tmux splitw -dv -l 5 'echo -e "\e[38;5;244mLOGS('$LOGS_FILE')"; tail --follow=name '$LOGS_FILE' 2>/dev/null'
+    tmux splitw -dv -l 5 'echo -e "\e[38;5;244mLOGS('$LOGS_FILE')"; tail -f '$LOGS_FILE''
 
 source "$_DIR"/.env
 source "$_DIR"/providers/opencode-zen.sh
@@ -127,6 +127,7 @@ function __consume_pipe {
 }
 
 function clean_exit {
+    fuser --silent --kill "$LOGS_FILE"
     rm -f $TMP_BASE*;
     kill -9 $mdcat_pid 2>/dev/null;
     exit;
