@@ -1,4 +1,4 @@
-MODELS=(minimax-m2.1-free glm-4.7-free kimi-k2.5-free big-pickle grok-code kimi-k2 kimi-k2-thinking claude-opus-4-5 claude-sonnet-4-5)
+MODELS=(minimax-m2.5-free minimax-m2.1-free glm-4.7-free kimi-k2.5-free big-pickle grok-code kimi-k2 kimi-k2-thinking claude-opus-4-5 claude-sonnet-4-5)
 
 SDK="" # ENUM: "openai_compat" | "anthropic"
 
@@ -19,7 +19,8 @@ declare -A \
         [anthropic]='.function.arguments += $chunk.delta.partial_json'
         [openai_compat]='.function.arguments += $chunk.choices[0].delta.tool_calls[0].function.arguments') \
     PARAM_REASONING=(
-        [anthropic]='.delta.thinking // ""' [openai_compat]='.choices[0].delta.reasoning_content // ""') \
+        [anthropic]='.delta.thinking // ""'
+        [openai_compat]='.choices[0].delta.reasoning_content // .choices[0].delta.reasoning // ""') \
     PARAM_TEXT=([anthropic]='.delta.text // ""' [openai_compat]='.choices[0].delta.content // ""') \
     KEY_HEADER=([anthropic]='x-api-key:' [openai_compat]='Authorization: Bearer')
 
@@ -82,8 +83,8 @@ function switch_model {
     jq_inplace '.model = "'"$model"'"'
 
     case "$model" in
-    minimax-* | claude-*) SDK="anthropic" ;;
-    glm-* | kimi-k2* | grok-code | big-pickle) SDK="openai_compat" ;;
+    minimax-m2.1* | claude-*) SDK="anthropic" ;;
+    glm-* | minimax-m2.5* | kimi-k2* | grok-code | big-pickle) SDK="openai_compat" ;;
     esac
 }
 
@@ -125,16 +126,14 @@ function api_completion {
         __transform_state_$SDK
         local state=$TMP_BASE'.sdk.json'
 
+            # -H 'x-opencode-session: :)' \
         curl -f -N -s "${ENDPOINT_URL[$SDK]}" \
             $([[ -z "$OPENCODE_ZEN_API_KEY" ]] || echo -H "${KEY_HEADER[$SDK]} ${OPENCODE_ZEN_API_KEY}") \
             --json @$state 2>>$LOGS_FILE | while IFS= read -r line; do
             # echo "$line" >>$LOGS_FILE
             [ -z "$line" ] && continue
 
-            grep -Eq '^data: ' <<<"$line" || {
-                grep -Eq '^event: ' <<<"$line" || echo Unexpected: "$line" >>$LOGS_FILE
-                continue
-            }
+            grep -Eq '^data: ' <<<"$line" || continue
 
             chunk=$(echo "$line" | sed -e 's/^data: //')
             [[ "$chunk" == '[DONE]' ]] && break
@@ -145,8 +144,9 @@ function api_completion {
             if [[ $(jq "${PARAM_TOOL_CHECK[$SDK]}" <<<"$chunk") == true ]]; then
                 idx=$(jq "${PARAM_TOOL_IDX[$SDK]}" <<<"$chunk")
                 if [[ -z "${tools[idx]}" ]]; then
-                    echo >>$LOGS_FILE
                     tools[idx]=$(jq -r "${PARAM_TOOL_CALL[$SDK]}" <<<"$chunk")
+                    echo >>$LOGS_FILE
+                    jq -r '.function.name' <<<"${tools[$idx]}" >>$LOGS_FILE
                 else
                     tools[idx]=$(jq -r --argjson chunk "$chunk" "${PARAM_ARG_APPEND[$SDK]}" <<<"${tools[idx]}")
                     echo -ne "\x0d ∑ ${#tools[idx]}" >>$LOGS_FILE
@@ -154,7 +154,6 @@ function api_completion {
             else
                 [[ "$(jq "${PARAM_REASONING[$SDK]}" <<<"$chunk")" != '""' ]] && {
                     jq "${PARAM_REASONING[$SDK]}" -r -j <<<"$chunk" >>$LOGS_FILE
-                    continue
                 }
 
                 [[ $(jq "${PARAM_TEXT[$SDK]}" <<<"$chunk") != '""' ]] && {

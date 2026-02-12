@@ -90,7 +90,7 @@ function tool_call {
         answer=$(echo -e "Yes\nYes, always allow this signature\nNo, adjust approach" |
             gum choose --header="$prompt" --cursor.foreground="#e5c07b")
 
-        [[ -n "$sound_pid" ]] && [[ "$sound_pid" == "$(jobs -rp | tail -1)" ]] && kill $sound_pid
+        [[ -n "$sound_pid" ]] && [[ "$sound_pid" == "$(jobs -rp | tail -1)" ]] && kill $sound_pid &>/dev/null
 
         case "$answer" in
         Yes) ;;
