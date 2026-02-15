@@ -65,7 +65,7 @@ Tool results may include <system-reminder> tags with useful info—heed them.
 - Call multiple tools in one response if independent (parallel). Sequence if dependent. Never guess params—use known values.
 - For exploring codebases (non-specific queries), use Glob + Read iteratively instead of broad searches.
 - ALWAYS use todos for planning/tracking in conversations.
-- ALWAYS use `uv run --with <package-name>` for python code when a package is needed instead of checking if the package exists
+
 
 
 # MATHEMATICAL NOTATION RULES (Strict)

@@ -139,7 +139,7 @@ function api_completion {
             [[ "$chunk" == '[DONE]' ]] && break
 
             [[ $(jq .usage <<<"$chunk") != null ]] &&
-                total_tokens=$(jq -r "${PARAM_TOTAL_TOKENS[$SDK]}" <<<"$chunk")
+                total_tokens=$(jq -r "${PARAM_TOTAL_TOKENS[$SDK]}" <<<"$chunk" | numfmt --to=si)
 
             if [[ $(jq "${PARAM_TOOL_CHECK[$SDK]}" <<<"$chunk") == true ]]; then
                 idx=$(jq "${PARAM_TOOL_IDX[$SDK]}" <<<"$chunk")

@@ -1,6 +1,6 @@
 TOOL_DEF='{
   "name": "Bash",
-  "description": "Execute a Bash command shell environment.\n - When using curl and you expect html output, prefer to use `html2text`.\n - You also have `pdftotext` available for reading pdfs.",
+  "description": "Execute a Bash command shell environment.\n - When using curl and you expect html output, prefer to use `html2text`.\n - You also have `pdftotext` available for reading pdfs.\n - Always use `uv run --with <package-name>` for python code when a package is needed instead of checking if the package exists",
   "parameters": {
     "type": "object",
     "properties": {
@@ -22,9 +22,17 @@ TOOL_DEF='{
 function PreBash {
   local parameters=$(jq '.timeout = (.timeout // 30)' <<<"$1") # set defaults
 
-  jq '{
+  local lang=bash
+
+  case "$(jq -r '.command' <<<"$parameters" | head -1)" in
+  uv* | python*) lang=python ;;
+  esac
+
+  local preview=$(jq -r '.command' <<<"$parameters" | bat --language $lang --color always)
+
+  jq --rawfile preview <(cat <<<"$preview") '{
     fmt: (.command|tojson),
-    preview: "",
+    preview: $preview,
     nextArgs: [.command, .timeout]
   }' <<<"$parameters"
 }

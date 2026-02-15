@@ -68,8 +68,8 @@ function tool_call {
     output=$(Pre$funcname "$parameters")
     [[ $? -ne 0 ]] && result="$output" && return # immediately exit on error
 
-    printf "$funcname>>\n%s\n\e[38;5;244m<<$funcname\n" "$(jq -r .preview <<<"$output")" >>$LOGS_FILE
     jq .nextArgs <<<"$output" >>$LOGS_FILE
+    printf "$funcname>\n%s\n\e[38;5;244m<$funcname\n" "$(jq -r .preview <<<"$output")" >>$LOGS_FILE
 
     fmt=$(jq -c -r .fmt <<<"$output")
 
@@ -103,16 +103,19 @@ function tool_call {
     }
 
     gum style "$fun $par" --foreground \
-        $([[ "$status_code" -eq 0 ]] && echo '#34d399' || echo "#e5c07b" --faint) >/dev/tty
-    kill -$SIG_PLAY $mdcat_pid 2>/dev/null
-    [[ "$status_code" -ne 0 ]] && return 1 # interrupt and give back prompt
+        $([[ "$status_code" -eq 0 ]] && echo '#34d399' || echo '#e5c07b' --faint) >/dev/tty
 
-    local nextArgs=()
-    jq '.nextArgs[]' <<<"$output" | while read -r line; do
-        nextArgs+=("$(jq -r '.' <<<"$line")")
-    done
-    result=$($funcname "${nextArgs[@]}" | tee -a $LOGS_FILE)
-    result=$(echo "$result" | head -c $MAX_OUTPUT)
+    if [[ "$status_code" -eq 0 ]]; then
+        local nextArgs=()
+        jq '.nextArgs[]' <<<"$output" | while read -r line; do
+            nextArgs+=("$(jq -r '.' <<<"$line")")
+        done
+        result=$($funcname "${nextArgs[@]}" | tee -a $LOGS_FILE)
+        result=$(echo "$result" | head -c $MAX_OUTPUT)
+    fi
+
+    kill -$SIG_PLAY $mdcat_pid 2>/dev/null
+    return $status_code
 }
 
 function __consume_pipe {
@@ -128,9 +131,9 @@ function __consume_pipe {
 
 function clean_exit {
     fuser --silent --kill "$LOGS_FILE"
-    rm -f $TMP_BASE*;
-    kill -9 $mdcat_pid 2>/dev/null;
-    exit;
+    rm -f $TMP_BASE*
+    kill -9 $mdcat_pid 2>/dev/null
+    exit
 }
 trap "clean_exit" EXIT
 trap '[ -z "$user_prompt" ] && clean_exit' INT # to interrupt generation and go back to prompt
